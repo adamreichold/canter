@@ -215,14 +215,18 @@ impl Query for CombinedQuery {
         }
 
         if !self.must_not.is_empty() {
-            sql.push_str("\nWHERE TRUE");
+            for idx in 0..self.must_not.len() {
+                sql.push_str("\nLEFT JOIN (");
 
-            for must_not in &self.must_not {
-                sql.push_str("\nAND document_id NOT IN (\n");
+                self.must_not[idx].to_sql(false, sql, params);
 
-                must_not.to_sql(false, sql, params);
+                write!(sql, ") AS clause_{} USING (document_id)", clauses + idx).unwrap();
+            }
 
-                sql.push_str("\n)");
+            write!(sql, "\nWHERE clause_{}.document_id IS NULL", clauses).unwrap();
+
+            for idx in 1..self.must_not.len() {
+                write!(sql, " AND clause_{}.document_id IS NULL", clauses + idx).unwrap();
             }
         }
     }

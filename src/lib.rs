@@ -212,12 +212,10 @@ mod tests {
         {
             let mut writer = index.rewrite().unwrap();
 
-            writer.add_text(1, "field", "foo").unwrap();
-            writer.add_text(1, "field", "bar").unwrap();
-            writer.add_text(1, "field", "baz").unwrap();
+            writer.add_text(1, "field", "FOO bar BAZ").unwrap();
 
             writer.add_text(2, "field", "foo").unwrap();
-            writer.add_text(3, "field", "bar").unwrap();
+            writer.add_text(3, "field", "BAR").unwrap();
             writer.add_text(4, "field", "baz").unwrap();
 
             writer.commit().unwrap();
