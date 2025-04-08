@@ -70,7 +70,20 @@ impl Query for TermQuery {
             sql.push_str("SELECT canter_postings.document_id AS document_id");
         }
 
-        write!(sql, " FROM canter_terms\nJOIN canter_postings ON canter_terms.id = canter_postings.term_id\nJOIN canter_documents ON canter_terms.field_id = canter_documents.field_id AND canter_postings.document_id = canter_documents.document_id \nWHERE canter_terms.field_id = {} AND canter_terms.value = ?", self.field_id).unwrap();
+        sql.push_str(
+            " FROM canter_terms\nJOIN canter_postings ON canter_terms.id = canter_postings.term_id",
+        );
+
+        if score {
+            sql.push_str("\nJOIN canter_documents ON canter_terms.field_id = canter_documents.field_id AND canter_postings.document_id = canter_documents.document_id");
+        }
+
+        write!(
+            sql,
+            "\nWHERE canter_terms.field_id = {} AND canter_terms.value = ?",
+            self.field_id
+        )
+        .unwrap();
 
         params.push(&self.value);
     }
