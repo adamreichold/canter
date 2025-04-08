@@ -13,6 +13,8 @@ pub enum Error {
     },
     NoSuchField(String),
     NoSuchTokenizer(String),
+    DisconnectedWriter,
+    DisconnectedSource,
     MissingFieldName(String),
     InvalidValue(String),
 }
@@ -33,6 +35,8 @@ impl fmt::Display for Error {
             ),
             Self::NoSuchField(name) => write!(fmt, "No such field: {name}"),
             Self::NoSuchTokenizer(name) => write!(fmt, "No such tokenizer: {name}"),
+            Self::DisconnectedWriter => write!(fmt, "Disconnected writer"),
+            Self::DisconnectedSource => write!(fmt, "Disconnected source"),
             Self::MissingFieldName(text) => write!(fmt, "Missing field name: {text}"),
             Self::InvalidValue(value) => write!(fmt, "Invalid value: {value}"),
         }
