@@ -6,7 +6,7 @@ impl Index {
     }
 }
 
-pub trait Tokenizer {
+pub trait Tokenizer: Send + Clone {
     fn tokenize<F>(&mut self, text: &str, f: F) -> Result<(), Error>
     where
         F: FnMut(&str) -> Result<(), Error>;
@@ -22,17 +22,19 @@ pub trait Tokenizer {
     }
 }
 
-pub trait ErasedTokenizer {
+pub trait ErasedTokenizer: Send {
     fn erased_tokenize(
         &mut self,
         text: &str,
         f: &mut dyn FnMut(&str) -> Result<(), Error>,
     ) -> Result<(), Error>;
+
+    fn erased_clone(&self) -> Box<dyn ErasedTokenizer>;
 }
 
 impl<T> ErasedTokenizer for T
 where
-    T: Tokenizer,
+    T: Tokenizer + 'static,
 {
     fn erased_tokenize(
         &mut self,
@@ -40,6 +42,10 @@ where
         f: &mut dyn FnMut(&str) -> Result<(), Error>,
     ) -> Result<(), Error> {
         self.tokenize(text, f)
+    }
+
+    fn erased_clone(&self) -> Box<dyn ErasedTokenizer> {
+        Box::new(self.clone())
     }
 }
 
@@ -52,6 +58,7 @@ where
     }
 }
 
+#[derive(Clone, Copy)]
 pub struct ChainedTokenizer<I, O> {
     inner: I,
     outer: O,
@@ -71,6 +78,7 @@ where
     }
 }
 
+#[derive(Clone, Copy)]
 pub struct StubTokenizer;
 
 impl Tokenizer for StubTokenizer {
@@ -82,6 +90,7 @@ impl Tokenizer for StubTokenizer {
     }
 }
 
+#[derive(Clone, Copy)]
 pub struct SplitNonAlphanumeric;
 
 impl Tokenizer for SplitNonAlphanumeric {
@@ -99,6 +108,7 @@ impl Tokenizer for SplitNonAlphanumeric {
     }
 }
 
+#[derive(Clone, Copy)]
 pub struct LimitLength {
     limit: usize,
 }
@@ -128,7 +138,7 @@ impl Tokenizer for LimitLength {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct ToLowerCase {
     buf: String,
 }
