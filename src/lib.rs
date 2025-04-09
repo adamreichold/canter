@@ -4,9 +4,9 @@ pub mod reader;
 pub mod tokenizer;
 pub mod writer;
 
-use std::collections::HashMap;
 use std::ops::{Deref, DerefMut};
 
+use hashbrown::hash_map::{EntryRef, HashMap};
 use rusqlite::{Connection, OptionalExtension, functions::FunctionFlags, params};
 
 use crate::{
@@ -19,6 +19,7 @@ use crate::{
 pub struct Index {
     conn: Connection,
     tokenizers: Tokenizers,
+    fields: Fields,
 }
 
 impl Deref for Index {
@@ -107,7 +108,11 @@ impl Index {
         .into_iter()
         .collect();
 
-        Ok(Self { conn, tokenizers })
+        Ok(Self {
+            conn,
+            tokenizers,
+            fields: HashMap::new(),
+        })
     }
 
     pub fn add_field(&mut self, name: &str, tokenizer: &str) -> Result<(), Error> {
@@ -159,32 +164,39 @@ struct Field {
 
 type Fields = HashMap<String, Field>;
 
-fn read_fields(conn: &Connection) -> Result<Fields, Error> {
-    let mut fields = HashMap::new();
+fn read_field<'fields>(
+    conn: &Connection,
+    fields: &'fields mut Fields,
+    name: &str,
+) -> Result<&'fields Field, Error> {
+    match fields.entry_ref(name) {
+        EntryRef::Occupied(entry) => Ok(entry.into_mut()),
+        EntryRef::Vacant(entry) => {
+            let mut stmt = conn.prepare("SELECT canter_fields.id, canter_fields.tokenizer, COUNT(canter_documents.document_id), AVG(canter_documents.count) FROM canter_fields LEFT JOIN canter_documents ON canter_fields.id == canter_documents.field_id WHERE canter_fields.name = ? GROUP BY canter_fields.id")?;
 
-    let mut stmt = conn.prepare("SELECT id, name, tokenizer, COUNT(canter_documents.document_id), AVG(canter_documents.count) FROM canter_fields LEFT JOIN canter_documents ON canter_fields.id == canter_documents.field_id GROUP BY canter_fields.id")?;
-    let mut rows = stmt.query(())?;
+            let field = stmt
+                .query_row(params![name], |row| {
+                    let id = row.get(0)?;
+                    let tokenizer = row.get(1)?;
 
-    while let Some(row) = rows.next()? {
-        let id = row.get(0)?;
-        let name = row.get(1)?;
-        let tokenizer = row.get(2)?;
+                    let documents = row.get::<_, Option<usize>>(2)?.unwrap_or(0);
+                    let avg_documents_count = row.get::<_, Option<f64>>(3)?.unwrap_or(0.0);
 
-        let documents = row.get::<_, Option<usize>>(3)?.unwrap_or(0);
-        let avg_documents_count = row.get::<_, Option<f64>>(4)?.unwrap_or(0.0);
+                    Ok(Field {
+                        id,
+                        tokenizer,
+                        documents,
+                        avg_documents_count,
+                    })
+                })
+                .optional()?;
 
-        fields.insert(
-            name,
-            Field {
-                id,
-                tokenizer,
-                documents,
-                avg_documents_count,
-            },
-        );
+            match field {
+                Some(field) => Ok(entry.insert(field)),
+                None => Err(Error::NoSuchField(name.to_owned())),
+            }
+        }
     }
-
-    Ok(fields)
 }
 
 #[cfg(test)]
