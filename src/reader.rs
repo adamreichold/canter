@@ -7,19 +7,17 @@ use crate::{
     Fields, Index, Tokenizers,
     error::Error,
     query::{CombinedQuery, Occur, Query, TermQuery},
-    read_fields,
+    read_field,
 };
 
 impl Index {
     pub fn read(&mut self) -> Result<Reader<'_>, Error> {
         let txn = self.conn.transaction()?;
 
-        let fields = read_fields(&txn)?;
-
         Ok(Reader {
             txn,
             tokenizers: &mut self.tokenizers,
-            fields,
+            fields: &mut self.fields,
         })
     }
 }
@@ -27,7 +25,7 @@ impl Index {
 pub struct Reader<'index> {
     txn: Transaction<'index>,
     tokenizers: &'index mut Tokenizers,
-    fields: Fields,
+    fields: &'index mut Fields,
 }
 
 impl Deref for Reader<'_> {
@@ -68,10 +66,7 @@ impl Reader<'_> {
         let (occur, text) = parse_occur(text);
         let (field_name, text) = parse_field_name(text)?;
 
-        let field = self
-            .fields
-            .get(field_name)
-            .ok_or_else(|| Error::NoSuchField(field_name.to_owned()))?;
+        let field = read_field(&self.txn, self.fields, field_name)?;
 
         let tokenizer = self
             .tokenizers

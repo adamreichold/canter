@@ -2,7 +2,7 @@ use std::ops::Deref;
 
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 
-use crate::{Fields, Index, Tokenizers, error::Error, read_fields};
+use crate::{Fields, Index, Tokenizers, error::Error, read_field};
 
 impl Index {
     pub fn rewrite(&mut self) -> Result<Writer<'_>, Error> {
@@ -27,12 +27,10 @@ impl Index {
             )?;
         }
 
-        let fields = read_fields(&txn)?;
-
         Ok(Writer {
             txn,
             tokenizers: &mut self.tokenizers,
-            fields,
+            fields: &mut self.fields,
         })
     }
 }
@@ -40,7 +38,7 @@ impl Index {
 pub struct Writer<'index> {
     txn: Transaction<'index>,
     tokenizers: &'index mut Tokenizers,
-    fields: Fields,
+    fields: &'index mut Fields,
 }
 
 impl Deref for Writer<'_> {
@@ -58,10 +56,7 @@ impl Writer<'_> {
         field_name: &str,
         text: &str,
     ) -> Result<(), Error> {
-        let field = self
-            .fields
-            .get(field_name)
-            .ok_or_else(|| Error::NoSuchField(field_name.to_owned()))?;
+        let field = read_field(&self.txn, self.fields, field_name)?;
 
         let tokenizer = self
             .tokenizers
@@ -93,6 +88,8 @@ impl Writer<'_> {
         )?;
 
         self.txn.commit()?;
+
+        self.fields.clear();
 
         Ok(())
     }
