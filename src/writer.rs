@@ -63,18 +63,18 @@ impl Writer<'_> {
             .get_mut(&field.tokenizer)
             .ok_or_else(|| Error::NoSuchTokenizer(field.tokenizer.clone()))?;
 
-        let mut count = 0;
+        let mut position = reset_position(&self.txn, field.id, document_id)?;
 
         tokenizer.erased_tokenize(text, &mut |token| {
-            let term_id = add_term(&self.txn, field.id, token)?;
-            add_posting(&self.txn, term_id, document_id)?;
+            position += 1;
 
-            count += 1;
+            let term_id = add_term(&self.txn, field.id, token)?;
+            add_posting(&self.txn, term_id, document_id, position)?;
 
             Ok(())
         })?;
 
-        add_document(&self.txn, field.id, document_id, count)?;
+        add_document(&self.txn, field.id, document_id, position)?;
 
         Ok(())
     }
@@ -120,10 +120,17 @@ fn add_term(conn: &Connection, field_id: i64, value: &str) -> Result<i64, Error>
     }
 }
 
-fn add_posting(conn: &Connection, term_id: i64, document_id: i64) -> Result<(), Error> {
-    let mut stmt = conn.prepare_cached("INSERT INTO canter_postings (term_id, document_id, count) VALUES (?, ?, 1) ON CONFLICT DO UPDATE SET count = count + 1")?;
+fn add_posting(
+    conn: &Connection,
+    term_id: i64,
+    document_id: i64,
+    position: usize,
+) -> Result<(), Error> {
+    let mut stmt = conn.prepare_cached(
+        "INSERT INTO canter_postings (term_id, document_id, position) VALUES (?, ?, ?)",
+    )?;
 
-    stmt.execute(params![term_id, document_id])?;
+    stmt.execute(params![term_id, document_id, position])?;
 
     Ok(())
 }
@@ -132,11 +139,23 @@ fn add_document(
     conn: &Connection,
     field_id: i64,
     document_id: i64,
-    count: usize,
+    position: usize,
 ) -> Result<(), Error> {
-    let mut stmt = conn.prepare_cached("INSERT INTO canter_documents (field_id, document_id, count) VALUES (?1, ?2, ?3) ON CONFLICT DO UPDATE SET count = count + ?3")?;
+    let mut stmt = conn.prepare_cached("INSERT INTO canter_documents (field_id, document_id, count) VALUES (?1, ?2, ?3) ON CONFLICT DO UPDATE SET count = ?3")?;
 
-    stmt.execute(params![field_id, document_id, count])?;
+    stmt.execute(params![field_id, document_id, position])?;
 
     Ok(())
+}
+
+fn reset_position(conn: &Connection, field_id: i64, document_id: i64) -> Result<usize, Error> {
+    let mut stmt = conn.prepare_cached(
+        "SELECT count FROM canter_documents WHERE field_id = ? AND document_id = ?",
+    )?;
+
+    let position = stmt
+        .query_row(params![field_id, document_id], |row| row.get::<_, usize>(0))
+        .optional()?;
+
+    Ok(position.unwrap_or(0))
 }
