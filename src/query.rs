@@ -89,6 +89,100 @@ impl Query for TermQuery {
     }
 }
 
+pub struct PhraseQuery {
+    field_id: i64,
+    documents: usize,
+    avg_documents_count: f64,
+    values: Vec<String>,
+}
+
+impl PhraseQuery {
+    pub(crate) fn new(field: &Field, values: Vec<String>) -> Self {
+        Self {
+            field_id: field.id,
+            documents: field.documents,
+            avg_documents_count: field.avg_documents_count,
+            values,
+        }
+    }
+}
+
+impl Query for PhraseQuery {
+    fn to_sql<'query>(
+        &'query self,
+        score: bool,
+        sql: &mut String,
+        params: &mut Vec<&'query dyn ToSql>,
+    ) {
+        if self.values.is_empty() {
+            return AllQuery.to_sql(score, sql, params);
+        }
+
+        if score {
+            sql.push_str("SELECT term_0.document_id AS document_id, term_0.score");
+
+            for idx in 1..self.values.len() {
+                write!(sql, " + term_{idx}.score").unwrap();
+            }
+
+            write!(sql, " AS score, {} AS terms FROM", self.values.len()).unwrap();
+        } else {
+            sql.push_str("SELECT term_0.document_id AS document_id FROM");
+        }
+
+        sql.push_str("(SELECT canter_postings.document_id AS document_id, canter_postings.position AS position");
+
+        if score {
+            write!(sql, ",\ncanter_bm25({}, {}, canter_terms.count, COUNT(canter_postings.position), canter_documents.count) AS score", self.documents, self.avg_documents_count).unwrap();
+        }
+
+        sql.push_str(
+            "\nFROM canter_terms JOIN canter_postings ON canter_terms.id = canter_postings.term_id",
+        );
+
+        if score {
+            sql.push_str("\nJOIN canter_documents ON canter_terms.field_id = canter_documents.field_id AND canter_postings.document_id = canter_documents.document_id");
+        }
+
+        write!(
+            sql,
+            r#"
+WHERE canter_terms.field_id = {} AND canter_terms.value = ?
+GROUP BY canter_postings.term_id, canter_postings.document_id) AS term_0"#,
+            self.field_id
+        )
+        .unwrap();
+
+        params.push(&self.values[0]);
+
+        for idx in 1..self.values.len() {
+            sql.push_str("\nJOIN (SELECT canter_postings.document_id AS document_id, canter_postings.position AS position");
+
+            if score {
+                write!(sql, ",\ncanter_bm25({}, {}, canter_terms.count, COUNT(canter_postings.position), canter_documents.count) AS score", self.documents, self.avg_documents_count).unwrap();
+            }
+
+            sql.push_str("\nFROM canter_terms JOIN canter_postings ON canter_terms.id = canter_postings.term_id");
+
+            if score {
+                sql.push_str("\nJOIN canter_documents ON canter_terms.field_id = canter_documents.field_id AND canter_postings.document_id = canter_documents.document_id");
+            }
+
+            write!(
+                sql,
+                r#"
+WHERE canter_terms.field_id = {} AND canter_terms.value = ?
+GROUP BY canter_postings.term_id, canter_postings.document_id) AS term_{idx}
+ON term_{idx}.document_id = term_0.document_id AND term_{idx}.position - term_0.position = {idx}"#,
+                self.field_id
+            )
+            .unwrap();
+
+            params.push(&self.values[idx]);
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 pub enum Occur {
     Should,
