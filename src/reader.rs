@@ -1,3 +1,4 @@
+use std::fmt::Write;
 use std::ops::Deref;
 
 use rusqlite::{Connection, Transaction};
@@ -93,27 +94,67 @@ impl Reader<'_> {
         Ok((occur, query, rest.trim_start()))
     }
 
-    pub fn search(&self, query: &dyn Query) -> Result<Vec<(i64, f64)>, Error> {
-        let mut sql = "SELECT document_id, score FROM (\n".to_owned();
+    pub fn search(
+        &self,
+        query: &dyn Query,
+        limit: Option<usize>,
+        offset: Option<usize>,
+        temp: Option<&str>,
+    ) -> Result<Vec<(i64, f64)>, Error> {
+        let mut sql = String::new();
         let mut params = Vec::new();
+
+        if let Some(temp) = temp {
+            write!(&mut sql, "CREATE TEMPORARY TABLE {temp} AS ").unwrap();
+        }
+
+        sql.push_str("SELECT document_id, score FROM (\n");
 
         query.to_sql(true, &mut sql, &mut params);
 
         sql.push_str("\n) ORDER BY score DESC");
 
+        if let Some(limit) = limit {
+            write!(&mut sql, " LIMIT {limit}").unwrap();
+        }
+
+        if let Some(offset) = offset {
+            write!(&mut sql, " OFFSET {offset}").unwrap();
+        }
+
         let mut results = Vec::new();
 
         let mut stmt = self.txn.prepare(&sql)?;
-        let mut rows = stmt.query(&*params)?;
 
-        while let Some(row) = rows.next()? {
-            let document_id = row.get::<_, i64>(0)?;
-            let score = row.get::<_, f64>(1)?;
+        if temp.is_none() {
+            let mut rows = stmt.query(&*params)?;
 
-            results.push((document_id, score));
+            while let Some(row) = rows.next()? {
+                let document_id = row.get::<_, i64>(0)?;
+                let score = row.get::<_, f64>(1)?;
+
+                results.push((document_id, score));
+            }
+        } else {
+            stmt.execute(&*params)?;
         }
 
         Ok(results)
+    }
+
+    pub fn search_all(&self, query: &dyn Query, temp: &str) -> Result<(), Error> {
+        let mut sql = String::new();
+        let mut params = Vec::new();
+
+        write!(&mut sql, "CREATE TEMPORARY TABLE {temp} AS ").unwrap();
+
+        query.to_sql(false, &mut sql, &mut params);
+
+        let mut stmt = self.txn.prepare(&sql)?;
+
+        stmt.execute(&*params)?;
+
+        Ok(())
     }
 }
 

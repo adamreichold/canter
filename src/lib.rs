@@ -258,7 +258,7 @@ mod tests {
             let mut reader = index.read().unwrap();
 
             let query = reader.parse("field:foo").unwrap();
-            let results = reader.search(&*query).unwrap();
+            let results = reader.search(&*query, None, None, None).unwrap();
             assert_eq!(results, []);
         }
 
@@ -278,7 +278,7 @@ mod tests {
         let mut reader = index.read().unwrap();
 
         let query = reader.parse("field:foo field:bar").unwrap();
-        let results = reader.search(&*query).unwrap();
+        let results = reader.search(&*query, None, None, None).unwrap();
         assert_eq!(
             results,
             [
@@ -289,31 +289,35 @@ mod tests {
         );
 
         let query = reader.parse("+field:foo +field:bar +field:baz").unwrap();
-        let results = reader.search(&*query).unwrap();
+        let results = reader.search(&*query, None, None, None).unwrap();
         assert_eq!(results, [(1, 4.1588830833596715)]);
 
         let query = reader.parse("+field:foo field:bar").unwrap();
-        let results = reader.search(&*query).unwrap();
+        let results = reader.search(&*query, None, None, None).unwrap();
         assert_eq!(results, [(1, 1.8483924814931874), (2, 0.8317766166719343)]);
 
         let query = reader.parse("+field:bar -field:foo -field:baz").unwrap();
-        let results = reader.search(&*query).unwrap();
+        let results = reader.search(&*query, None, None, None).unwrap();
         assert_eq!(results, [(3, 0.8317766166719343)]);
 
         let query = reader.parse("-field:foo").unwrap();
-        let results = reader.search(&*query).unwrap();
+        let results = reader.search(&*query, None, None, None).unwrap();
         assert_eq!(results, [(3, 1.0), (4, 1.0)]);
 
         let query = reader.parse("field:\"bar baz\"").unwrap();
-        let results = reader.search(&*query).unwrap();
+        let results = reader.search(&*query, None, None, None).unwrap();
         assert_eq!(results, [(1, 1.8483924814931874)]);
 
         let query = reader.parse("field:\"foo baz\"").unwrap();
-        let results = reader.search(&*query).unwrap();
+        let results = reader.search(&*query, None, None, None).unwrap();
         assert_eq!(results, []);
 
         let query = reader.parse("field:foo -field:\"bar baz\"").unwrap();
-        let results = reader.search(&*query).unwrap();
+        let results = reader.search(&*query, None, None, None).unwrap();
+        assert_eq!(results, [(2, 0.8317766166719343)]);
+
+        let query = reader.parse("field:foo field:bar").unwrap();
+        let results = reader.search(&*query, Some(1), Some(1), None).unwrap();
         assert_eq!(results, [(2, 0.8317766166719343)]);
     }
 }
