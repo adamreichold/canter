@@ -8,6 +8,7 @@ use crate::{
     error::Error,
     query::{CombinedQuery, Occur, Query, TermQuery},
     read_field,
+    tokenizer::ErasedTokenizer,
 };
 
 impl Index {
@@ -73,29 +74,20 @@ impl Reader<'_> {
             .get_mut(&field.tokenizer)
             .ok_or_else(|| Error::NoSuchTokenizer(field.tokenizer.clone()))?;
 
-        let pos = text.find(char::is_whitespace).unwrap_or(text.len());
-        let (value, text) = text.split_at(pos);
+        let (mut values, rest) = parse_values(tokenizer, text)?;
 
-        let mut tokens = SmallVec::<[String; 1]>::new();
-
-        tokenizer.erased_tokenize(value, &mut |token| {
-            tokens.push(token.to_owned());
-
-            Ok(())
-        })?;
-
-        let query = match tokens.len() {
-            0 => return Err(Error::InvalidValue(value.to_owned())),
-            1 => TermQuery::new(field, tokens.pop().unwrap()).into(),
+        let query = match values.len() {
+            0 => return Err(Error::InvalidValue(text.to_owned())),
+            1 => TermQuery::new(field, values.pop().unwrap()).into(),
             _ => CombinedQuery::new(
-                tokens
+                values
                     .into_iter()
                     .map(|token| (Occur::Must, TermQuery::new(field, token).into())),
             )
             .into(),
         };
 
-        Ok((occur, query, text.trim_start()))
+        Ok((occur, query, rest.trim_start()))
     }
 
     pub fn search(&self, query: &dyn Query) -> Result<Vec<(i64, f64)>, Error> {
@@ -141,4 +133,34 @@ fn parse_field_name(text: &str) -> Result<(&str, &str), Error> {
     let text = &text[pos + 1..];
 
     Ok((field_name, text))
+}
+
+fn parse_values<'text>(
+    tokenizer: &mut Box<dyn ErasedTokenizer>,
+    text: &'text str,
+) -> Result<(SmallVec<[String; 1]>, &'text str), Error> {
+    let (value, text) = match text.strip_prefix("\"") {
+        Some(text) => {
+            let pos = text
+                .find('"')
+                .ok_or_else(|| Error::UnclosedQuote(text.to_owned()))?;
+
+            (&text[..pos], &text[pos + 1..])
+        }
+        None => {
+            let pos = text.find(char::is_whitespace).unwrap_or(text.len());
+
+            text.split_at(pos)
+        }
+    };
+
+    let mut values = SmallVec::new();
+
+    tokenizer.erased_tokenize(value, &mut |token| {
+        values.push(token.to_owned());
+
+        Ok(())
+    })?;
+
+    Ok((values, text))
 }

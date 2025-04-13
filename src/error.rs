@@ -14,6 +14,7 @@ pub enum Error {
     NoSuchField(String),
     NoSuchTokenizer(String),
     MissingFieldName(String),
+    UnclosedQuote(String),
     InvalidValue(String),
 }
 
@@ -34,7 +35,8 @@ impl fmt::Display for Error {
             Self::NoSuchField(name) => write!(fmt, "No such field: {name}"),
             Self::NoSuchTokenizer(name) => write!(fmt, "No such tokenizer: {name}"),
             Self::MissingFieldName(text) => write!(fmt, "Missing field name: {text}"),
-            Self::InvalidValue(value) => write!(fmt, "Invalid value: {value}"),
+            Self::UnclosedQuote(text) => write!(fmt, "Unclosed quote: {text}"),
+            Self::InvalidValue(text) => write!(fmt, "Invalid value: {text}"),
         }
     }
 }
