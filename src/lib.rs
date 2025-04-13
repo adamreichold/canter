@@ -79,8 +79,8 @@ impl Index {
                CREATE TABLE IF NOT EXISTS canter_postings (
                    term_id INTEGER NOT NULL,
                    document_id INTEGER NOT NULL,
-                   count INTEGER NOT NULL,
-                   PRIMARY KEY (term_id, document_id)
+                   position INTEGER NOT NULL,
+                   PRIMARY KEY (term_id, document_id, position)
                )
                WITHOUT ROWID;
 
@@ -231,7 +231,8 @@ mod tests {
         {
             let mut writer = index.rewrite().unwrap();
 
-            writer.add_text(1, "field", "FOO bar BAZ").unwrap();
+            writer.add_text(1, "field", "FOO bar").unwrap();
+            writer.add_text(1, "field", "BAZ").unwrap();
 
             writer.add_text(2, "field", "foo").unwrap();
             writer.add_text(3, "field", "BAR").unwrap();

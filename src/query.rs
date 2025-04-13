@@ -65,7 +65,7 @@ impl Query for TermQuery {
         params: &mut Vec<&'query dyn ToSql>,
     ) {
         if score {
-            write!(sql, "SELECT canter_postings.document_id AS document_id, canter_bm25({}, {}, canter_terms.count, canter_postings.count, canter_documents.count) AS score, 1 as terms", self.documents, self.avg_documents_count).unwrap();
+            write!(sql, "SELECT canter_postings.document_id AS document_id, canter_bm25({}, {}, canter_terms.count, COUNT(canter_postings.position), canter_documents.count) AS score, 1 as terms", self.documents, self.avg_documents_count).unwrap();
         } else {
             sql.push_str("SELECT canter_postings.document_id AS document_id");
         }
@@ -80,7 +80,7 @@ impl Query for TermQuery {
 
         write!(
             sql,
-            "\nWHERE canter_terms.field_id = {} AND canter_terms.value = ?",
+            "\nWHERE canter_terms.field_id = {} AND canter_terms.value = ? GROUP BY canter_postings.term_id, canter_postings.document_id",
             self.field_id
         )
         .unwrap();
