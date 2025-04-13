@@ -4,7 +4,7 @@ use rusqlite::{Connection, Transaction};
 use smallvec::SmallVec;
 
 use crate::{
-    Fields, Index, Tokenizers,
+    Config, Fields, Index, Tokenizers,
     error::Error,
     query::{CombinedQuery, Occur, PhraseQuery, Query, TermQuery},
     read_field,
@@ -17,6 +17,7 @@ impl Index {
 
         Ok(Reader {
             txn,
+            config: &self.config,
             tokenizers: &mut self.tokenizers,
             fields: &mut self.fields,
         })
@@ -25,6 +26,7 @@ impl Index {
 
 pub struct Reader<'index> {
     txn: Transaction<'index>,
+    config: &'index Config,
     tokenizers: &'index mut Tokenizers,
     fields: &'index mut Fields,
 }
@@ -76,10 +78,16 @@ impl Reader<'_> {
 
         let (mut values, rest) = parse_values(tokenizer, text)?;
 
+        let boost = self
+            .config
+            .fields
+            .get(field_name)
+            .map_or(1.0, |config| config.boost);
+
         let query = match values.len() {
             0 => return Err(Error::InvalidValue(text.to_owned())),
-            1 => TermQuery::new(field, values.pop().unwrap()).into(),
-            _ => PhraseQuery::new(field, values.into_vec()).into(),
+            1 => TermQuery::new(field, boost, values.pop().unwrap()).into(),
+            _ => PhraseQuery::new(field, boost, values.into_vec()).into(),
         };
 
         Ok((occur, query, rest.trim_start()))

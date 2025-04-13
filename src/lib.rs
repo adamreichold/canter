@@ -17,9 +17,17 @@ use crate::{
 };
 
 #[non_exhaustive]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Config {
     pub bm25_k1: f64,
     pub bm25_b: f64,
+    pub fields: HashMap<String, FieldConfig>,
+}
+
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq)]
+pub struct FieldConfig {
+    pub boost: f64,
 }
 
 impl Default for Config {
@@ -27,12 +35,20 @@ impl Default for Config {
         Self {
             bm25_k1: 2.0,
             bm25_b: 0.75,
+            fields: HashMap::new(),
         }
+    }
+}
+
+impl Default for FieldConfig {
+    fn default() -> Self {
+        Self { boost: 1.0 }
     }
 }
 
 pub struct Index {
     conn: Connection,
+    config: Config,
     tokenizers: Tokenizers,
     fields: Fields,
 }
@@ -127,6 +143,7 @@ impl Index {
 
         Ok(Self {
             conn,
+            config,
             tokenizers,
             fields: HashMap::new(),
         })

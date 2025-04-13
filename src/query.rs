@@ -43,15 +43,17 @@ pub struct TermQuery {
     field_id: i64,
     documents: usize,
     avg_documents_count: f64,
+    boost: f64,
     value: String,
 }
 
 impl TermQuery {
-    pub(crate) fn new(field: &Field, value: String) -> Self {
+    pub(crate) fn new(field: &Field, boost: f64, value: String) -> Self {
         Self {
             field_id: field.id,
             documents: field.documents,
             avg_documents_count: field.avg_documents_count,
+            boost,
             value,
         }
     }
@@ -65,7 +67,17 @@ impl Query for TermQuery {
         params: &mut Vec<&'query dyn ToSql>,
     ) {
         if score {
-            write!(sql, "SELECT canter_postings.document_id AS document_id, canter_bm25({}, {}, canter_terms.count, COUNT(canter_postings.position), canter_documents.count) AS score, 1 as terms", self.documents, self.avg_documents_count).unwrap();
+            write!(
+                sql,
+                r#"SELECT canter_postings.document_id AS document_id,
+                   {} * canter_bm25({}, {},
+                       canter_terms.count,
+                       COUNT(canter_postings.position),
+                       canter_documents.count) AS score,
+                   1 as terms"#,
+                self.boost, self.documents, self.avg_documents_count
+            )
+            .unwrap();
         } else {
             sql.push_str("SELECT canter_postings.document_id AS document_id");
         }
@@ -93,15 +105,17 @@ pub struct PhraseQuery {
     field_id: i64,
     documents: usize,
     avg_documents_count: f64,
+    boost: f64,
     values: Vec<String>,
 }
 
 impl PhraseQuery {
-    pub(crate) fn new(field: &Field, values: Vec<String>) -> Self {
+    pub(crate) fn new(field: &Field, boost: f64, values: Vec<String>) -> Self {
         Self {
             field_id: field.id,
             documents: field.documents,
             avg_documents_count: field.avg_documents_count,
+            boost,
             values,
         }
     }
@@ -119,13 +133,18 @@ impl Query for PhraseQuery {
         }
 
         if score {
-            sql.push_str("SELECT term_0.document_id AS document_id, term_0.score");
+            write!(
+                sql,
+                "SELECT term_0.document_id AS document_id, {} * (term_0.score",
+                self.boost
+            )
+            .unwrap();
 
             for idx in 1..self.values.len() {
                 write!(sql, " + term_{idx}.score").unwrap();
             }
 
-            write!(sql, " AS score, {} AS terms FROM", self.values.len()).unwrap();
+            write!(sql, ") AS score, {} AS terms FROM", self.values.len()).unwrap();
         } else {
             sql.push_str("SELECT term_0.document_id AS document_id FROM");
         }
