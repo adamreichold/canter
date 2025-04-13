@@ -16,6 +16,21 @@ use crate::{
     },
 };
 
+#[non_exhaustive]
+pub struct Config {
+    pub bm25_k1: f64,
+    pub bm25_b: f64,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            bm25_k1: 2.0,
+            bm25_b: 0.75,
+        }
+    }
+}
+
 pub struct Index {
     conn: Connection,
     tokenizers: Tokenizers,
@@ -37,12 +52,15 @@ impl DerefMut for Index {
 }
 
 impl Index {
-    pub fn open(mut conn: Connection) -> Result<Self, Error> {
+    pub fn open(mut conn: Connection, config: Config) -> Result<Self, Error> {
+        let bm25_k1 = config.bm25_k1;
+        let bm25_b = config.bm25_b;
+
         conn.create_scalar_function(
             "canter_bm25",
             5,
             FunctionFlags::SQLITE_DETERMINISTIC,
-            |ctx| {
+            move |ctx| {
                 let documents = ctx.get::<usize>(0)? as f64;
                 let avg_documents_count = ctx.get::<f64>(1)?;
                 let terms_count = ctx.get::<usize>(2)? as f64;
@@ -51,11 +69,10 @@ impl Index {
 
                 let idf = ((documents - terms_count + 0.5) / (terms_count + 0.5) + 1.0).ln();
 
-                const K1: f64 = 2.0;
-                const B: f64 = 0.75;
-
-                Ok(idf * (postings_count * (K1 + 1.0))
-                    / (postings_count + K1 * (1.0 - B + B * documents_count / avg_documents_count)))
+                Ok(idf * (postings_count * (bm25_k1 + 1.0))
+                    / (postings_count
+                        + bm25_k1
+                            * (1.0 - bm25_b + bm25_b * documents_count / avg_documents_count)))
             },
         )?;
 
@@ -216,7 +233,7 @@ mod tests {
     fn it_works() {
         let conn = Connection::open_in_memory().unwrap();
 
-        let mut index = Index::open(conn).unwrap();
+        let mut index = Index::open(conn, Default::default()).unwrap();
 
         index.add_field("field", "default").unwrap();
 
