@@ -6,7 +6,7 @@ use smallvec::SmallVec;
 use crate::{
     Fields, Index, Tokenizers,
     error::Error,
-    query::{CombinedQuery, Occur, Query, TermQuery},
+    query::{CombinedQuery, Occur, PhraseQuery, Query, TermQuery},
     read_field,
     tokenizer::ErasedTokenizer,
 };
@@ -79,12 +79,7 @@ impl Reader<'_> {
         let query = match values.len() {
             0 => return Err(Error::InvalidValue(text.to_owned())),
             1 => TermQuery::new(field, values.pop().unwrap()).into(),
-            _ => CombinedQuery::new(
-                values
-                    .into_iter()
-                    .map(|token| (Occur::Must, TermQuery::new(field, token).into())),
-            )
-            .into(),
+            _ => PhraseQuery::new(field, values.into_vec()).into(),
         };
 
         Ok((occur, query, rest.trim_start()))

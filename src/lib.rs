@@ -276,6 +276,10 @@ mod tests {
 
         let query = reader.parse("field:\"foo baz\"").unwrap();
         let results = reader.search(&*query).unwrap();
-        assert_eq!(results, [(1, 1.8483924814931874)]);
+        assert_eq!(results, []);
+
+        let query = reader.parse("field:foo -field:\"bar baz\"").unwrap();
+        let results = reader.search(&*query).unwrap();
+        assert_eq!(results, [(2, 0.8317766166719343)]);
     }
 }
