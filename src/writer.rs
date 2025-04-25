@@ -1,8 +1,14 @@
+use std::num::NonZero;
 use std::ops::Deref;
+use std::sync::mpsc::{Sender, SyncSender, channel, sync_channel};
+use std::thread::{available_parallelism, scope};
 
+use hashbrown::hash_map::EntryRef;
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 
-use crate::{Fields, Index, Tokenizers, error::Error, read_field};
+use crate::{
+    Field, Fields, Index, Tokenizers, error::Error, read_field, tokenizer::ErasedTokenizer,
+};
 
 impl Index {
     pub fn rewrite(&mut self) -> Result<Writer<'_>, Error> {
@@ -158,4 +164,139 @@ fn reset_position(conn: &Connection, field_id: i64, document_id: i64) -> Result<
         .optional()?;
 
     Ok(position.unwrap_or(0))
+}
+
+impl Writer<'_> {
+    pub fn add_many<S, E>(&mut self, source: S) -> Result<(), E>
+    where
+        S: FnOnce(Sink) -> Result<(), E> + Send + Clone,
+        E: From<Error> + Send,
+    {
+        let parallelism = available_parallelism().map_or(1, NonZero::get);
+
+        let (sender, receiver) = sync_channel(parallelism);
+
+        scope(|scope| {
+            let mut threads = Vec::new();
+
+            for _ in 0..parallelism {
+                let source = source.clone();
+
+                let sink = Sink {
+                    tokenizers: Default::default(),
+                    fields: Default::default(),
+                    sender: sender.clone(),
+                };
+
+                let thread = scope.spawn(move || source(sink));
+
+                threads.push(thread);
+            }
+
+            drop(sender);
+
+            for msg in receiver {
+                match msg {
+                    Message::Text(field_id, document_id, tokens) => {
+                        let mut position = reset_position(&self.txn, field_id, document_id)?;
+
+                        for token in &tokens {
+                            position += 1;
+
+                            let term_id = add_term(&self.txn, field_id, token)?;
+                            add_posting(&self.txn, term_id, document_id, position)?;
+                        }
+
+                        add_document(&self.txn, field_id, document_id, position)?;
+                    }
+                    Message::Field(field_name, sender) => {
+                        let field = read_field(&self.txn, self.fields, &field_name)?;
+
+                        sender
+                            .send(field.clone())
+                            .map_err(|_err| Error::DisconnectedSource)?;
+                    }
+                    Message::Tokenizer(tokenizer, sender) => {
+                        let tokenizer = self
+                            .tokenizers
+                            .get(&tokenizer)
+                            .ok_or_else(|| Error::NoSuchTokenizer(tokenizer))?;
+
+                        sender
+                            .send(tokenizer.erased_clone())
+                            .map_err(|_err| Error::DisconnectedSource)?;
+                    }
+                }
+            }
+
+            for thread in threads {
+                thread.join().unwrap()?;
+            }
+
+            Ok(())
+        })
+    }
+}
+
+enum Message {
+    Text(i64, i64, Vec<String>),
+    Field(String, Sender<Field>),
+    Tokenizer(String, Sender<Box<dyn ErasedTokenizer>>),
+}
+
+pub struct Sink {
+    tokenizers: Tokenizers,
+    fields: Fields,
+    sender: SyncSender<Message>,
+}
+
+impl Sink {
+    pub fn add_text(
+        &mut self,
+        document_id: i64,
+        field_name: &str,
+        text: &str,
+    ) -> Result<(), Error> {
+        let field = match self.fields.entry_ref(field_name) {
+            EntryRef::Occupied(entry) => entry.into_mut(),
+            EntryRef::Vacant(entry) => {
+                let (sender, receiver) = channel();
+
+                self.sender
+                    .send(Message::Field(field_name.to_owned(), sender))
+                    .map_err(|_err| Error::DisconnectedWriter)?;
+
+                let field = receiver.recv().map_err(|_err| Error::DisconnectedWriter)?;
+
+                entry.insert(field)
+            }
+        };
+
+        let tokenizer = match self.tokenizers.entry_ref(&field.tokenizer) {
+            EntryRef::Occupied(entry) => entry.into_mut(),
+            EntryRef::Vacant(entry) => {
+                let (sender, receiver) = channel();
+
+                self.sender
+                    .send(Message::Tokenizer(field.tokenizer.clone(), sender))
+                    .map_err(|_err| Error::DisconnectedWriter)?;
+
+                let tokenizer = receiver.recv().map_err(|_err| Error::DisconnectedWriter)?;
+
+                entry.insert(tokenizer)
+            }
+        };
+
+        let mut tokens = Vec::new();
+
+        tokenizer.erased_tokenize(text, &mut |token| {
+            tokens.push(token.to_owned());
+
+            Ok(())
+        })?;
+
+        self.sender
+            .send(Message::Text(field.id, document_id, tokens))
+            .map_err(|_err| Error::DisconnectedWriter)
+    }
 }

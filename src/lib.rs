@@ -189,6 +189,7 @@ impl Index {
 
 type Tokenizers = HashMap<String, Box<dyn ErasedTokenizer>>;
 
+#[derive(Clone)]
 struct Field {
     id: i64,
     tokenizer: String,
@@ -242,9 +243,11 @@ fn read_field<'fields>(
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Mutex;
+
     use rusqlite::Connection;
 
-    use crate::Index;
+    use crate::{Index, error::Error};
 
     #[test]
     fn it_works() {
@@ -265,12 +268,19 @@ mod tests {
         {
             let mut writer = index.rewrite().unwrap();
 
-            writer.add_text(1, "field", "FOO bar").unwrap();
-            writer.add_text(1, "field", "BAZ").unwrap();
+            let docs = &Mutex::new(vec![(1, "FOO bar"), (2, "foo"), (3, "BAR"), (4, "baz")]);
 
-            writer.add_text(2, "field", "foo").unwrap();
-            writer.add_text(3, "field", "BAR").unwrap();
-            writer.add_text(4, "field", "baz").unwrap();
+            writer
+                .add_many(|mut sink| {
+                    while let Some((document_id, text)) = docs.lock().unwrap().pop() {
+                        sink.add_text(document_id, "field", text)?;
+                    }
+
+                    Ok::<_, Error>(())
+                })
+                .unwrap();
+
+            writer.add_text(1, "field", "BAZ").unwrap();
 
             writer.commit().unwrap();
         }
@@ -302,7 +312,7 @@ mod tests {
 
         let query = reader.parse("-field:foo").unwrap();
         let results = reader.search(&*query, None, None, None).unwrap();
-        assert_eq!(results, [(3, 1.0), (4, 1.0)]);
+        assert_eq!(results, [(4, 1.0), (3, 1.0)]);
 
         let query = reader.parse("field:\"bar baz\"").unwrap();
         let results = reader.search(&*query, None, None, None).unwrap();
